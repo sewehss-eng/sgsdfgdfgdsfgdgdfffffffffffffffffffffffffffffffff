@@ -24,6 +24,25 @@ log = logging.getLogger("drive_panel")
 
 
 def build_dispatcher() -> Dispatcher:
+    # Проверяем разбор реальных команд до начала polling: при старом
+    # callbacks.py бот не должен молча запускаться с неработающим меню.
+    from bot.keyboards.callbacks import OwnerCb, OwnerCatCb, OwnerTplCb
+
+    for factory, raw in (
+        (OwnerCb, "own:settings::0"),
+        (OwnerCb, "own:templates::0"),
+        (OwnerCatCb, "ocat:open:1::"),
+        (OwnerTplCb, "otpl:open:1::"),
+    ):
+        try:
+            factory.unpack(raw)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Не работает разбор кнопок. Обновите bot/keyboards/callbacks.py "
+                "в той копии проекта, из которой запускается бот."
+            ) from exc
+    log.info("CALLBACK_FIX_V1: проверка кнопок пройдена; main=%s", __file__)
+
     dp = Dispatcher(storage=MemoryStorage())
 
     # Роутеры импортируем здесь, чтобы хендлеры зарегистрировались на своих роутерах.
