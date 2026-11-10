@@ -54,6 +54,13 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(router_owner)
     dp.include_router(router_user)
     dp.include_router(router_common)
+    for router in (router_owner, router_user, router_common):
+        log.info(
+            "Router %s: message_handlers=%d callback_handlers=%d",
+            router.name,
+            len(router.message.handlers),
+            len(router.callback_query.handlers),
+        )
     return dp
 
 

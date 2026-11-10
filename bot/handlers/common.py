@@ -8,6 +8,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -111,7 +112,40 @@ async def _notify_owner_access_request(bot: Bot, user) -> None:
         log.error("Не удалось отправить заявку владельцу: %s", e)
 
 
-# Последний в цепочке — устаревшие / неизвестные callback.
+# Последний в цепочке — неизвестные callback. Не называем любую такую
+# кнопку устаревшей: причиной могут быть права или отсутствие обработчика.
 @router_common.callback_query()
-async def unknown_callback(call: CallbackQuery) -> None:
-    await call.answer("Кнопка устарела, откройте /start", show_alert=True)
+async def unknown_callback(call: CallbackQuery, state: FSMContext) -> None:
+    callback_data = call.data or ""
+    is_owner = call.from_user.id == settings.superadmin_id
+    is_owner_button = (
+        callback_data == "open_admin"
+        or callback_data.split(":", 1)[0] in {"own", "ocat", "otpl", "usr"}
+    )
+    current_state = await state.get_state()
+    log.warning(
+        "Unhandled callback: user_id=%s is_owner=%s owner_button=%s "
+        "data=%r state=%r",
+        call.from_user.id,
+        is_owner,
+        is_owner_button,
+        callback_data[:128],
+        current_state,
+    )
+
+    if is_owner_button and not is_owner:
+        await call.answer(
+            "Это меню доступно только владельцу бота.", show_alert=True
+        )
+        return
+    if is_owner_button:
+        await call.answer(
+            "Не найден обработчик кнопки меню. Данные записаны в журнал бота. "
+            "Попробуйте открыть /admin.",
+            show_alert=True,
+        )
+        return
+    await call.answer(
+        "Неизвестная кнопка. Откройте актуальное меню через /start.",
+        show_alert=True,
+    )
