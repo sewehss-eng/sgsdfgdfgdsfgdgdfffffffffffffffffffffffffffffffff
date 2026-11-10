@@ -19,7 +19,7 @@ from bot.keyboards.user_kb import (
     open_link_button_kb,
     templates_choose_kb,
 )
-from bot.services import settings_service, template_service
+from bot.services import settings_service, template_service, region_service
 from bot.services.drive_service import (
     DriveAccessError,
     DriveError,
@@ -44,6 +44,19 @@ def _pick_material_template(templates):
         if "материал" in (t["title"] or "").lower():
             return t
     return templates[0]
+
+
+async def _render_material(drive, cat: int, iid: str, body: str, name: str, url: str) -> str:
+    extra = await repo.get_vars_with_inheritance(cat)
+    category = await repo.get_category(cat)
+    root = category["folder_id"] if category else None
+    region = await region_service.resolve_region(drive, iid, category_root=root)
+    if region:
+        extra = region_service.region_values(extra, region)
+    rendered = template_service.render(body, name=name, url=url, extra=extra)
+    if region:
+        rendered = region_service.correct_region_label(rendered, region)
+    return rendered
 
 
 # --- Шаг 1: пользователь выбрал элемент → меню из 3 режимов ---
@@ -115,8 +128,12 @@ async def link_mode(call: CallbackQuery, callback_data: LinkModeCb, bot: Bot) ->
             await call.answer("Для этой категории нет шаблонов.", show_alert=True)
             return
         tpl = _pick_material_template(templates)
-        extra = await repo.get_vars_with_inheritance(cat)
-        rendered = template_service.render(tpl["body"], name=name, url=url, extra=extra)
+        try:
+            rendered = await _render_material(drive, cat, iid, tpl["body"], name, url)
+        except DriveError:
+            log.exception("Не удалось определить регион материала %s", iid)
+            await call.answer("Не удалось проверить регион. Попробуйте позже.", show_alert=True)
+            return
         # Два сообщения: с <code> (копируется тапом) и без (переслать как есть).
         await call.message.answer(f"<code>{_esc(rendered)}</code>")
         await call.message.answer(rendered)
@@ -150,9 +167,12 @@ async def apply_template(call: CallbackQuery, callback_data: TemplateCb, bot: Bo
 
     name = meta.get("name", "Элемент")
     url = DriveService.public_url(iid, folder)
-    # Кастомные значения плейсхолдеров берём из категории (с наследованием).
-    extra = await repo.get_vars_with_inheritance(cat)
-    rendered = template_service.render(tpl["body"], name=name, url=url, extra=extra)
+    try:
+        rendered = await _render_material(drive, cat, iid, tpl["body"], name, url)
+    except DriveError:
+        log.exception("Не удалось определить регион материала %s", iid)
+        await call.answer("Не удалось проверить регион. Попробуйте позже.", show_alert=True)
+        return
 
     # Два сообщения: с <code> (копируется одним тапом) и без (переслать как есть).
     await call.message.answer(f"<code>{_esc(rendered)}</code>")
